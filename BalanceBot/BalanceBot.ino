@@ -57,9 +57,11 @@ const uint32_t TRIM_SAVE_MS = 5000;  // save learned trim after balancing at lea
 const uint16_t RUNAWAY_MS = 1500;     // disarm if pinned at max speed this long (can't recover)
 const float RATE_FILTER = 0.5;        // smoothing on the gyro rate used for damping (~20 Hz)
 
-// Adaptive coil drive: idle at cfg.minPower, rise to full as acceleration/speed demand grows.
+// Adaptive coil drive: sit at cfg.minPower, and boost only when demand outgrows it.
 const float POWER_FULL_ACCEL = 6000;  // steps/s^2 demand that calls for full drive
 const float POWER_FULL_SPEED = 600;   // steps/s that calls for full drive (back-EMF eats torque)
+const float POWER_MARGIN = 1.5;       // drive this much above the estimated need
+const float POWER_EMERGENCY_TILT = 4; // degrees off target: really falling, use full drive
 const float POWER_DECAY = 0.98;       // per loop: ~0.25 s to ease back down after a boost
 
 // Declared before any function so Arduino's generated prototypes can see it.
@@ -88,7 +90,7 @@ struct Settings {
   float ktrim;   // degrees of trim correction per second, per step away from home
   float minPower;  // idle coil drive, 0..1 (1 = always full, like a plain L298N)
 };
-const uint16_t SETTINGS_MAGIC = 0xBB06;
+const uint16_t SETTINGS_MAGIC = 0xBB07;
 Settings cfg;
 
 void loadDefaults() {
@@ -96,8 +98,9 @@ void loadDefaults() {
   // kv/kx from the first run: 0.004 let it reach the speed cap and run away.
   // kv, kx and ktrim form a PID on wheel position: a CG shift first pushes the bot off
   // its spot, then trim keeps moving until it is back home on the true balance point.
-  // Trim 2.4 is what the bare bot learned.
-  cfg = {SETTINGS_MAGIC, 250, 22, 0.01, 0.01, 2.4, 0.995, true, false, 0.003, 1.0};
+  // Trim 2.4 is what the bare bot learned. ktrim 0.003 swayed around home; 0.002 settles.
+  // Idle drive 40% balanced fine (peak boost ~67%) at about a quarter of full-power heat.
+  cfg = {SETTINGS_MAGIC, 250, 22, 0.01, 0.01, 2.4, 0.995, true, false, 0.002, 0.4};
 }
 
 // ---------- Stepper driver ----------
@@ -265,6 +268,7 @@ uint32_t armedAt = 0;
 uint32_t pinnedSince = 0;   // when the wheels last hit max speed
 float trimAtArm = 0;
 float power = 1;      // current coil drive fraction
+bool savePending = false;  // 'w' while armed: save once it disarms
 
 void arm() {
   speedCmd = speedFilt = position = 0;
@@ -289,10 +293,12 @@ void disarm(const __FlashStringHelper *why) {
   Serial.print(F("# disarmed: "));
   Serial.println(why);
 
-  // Save the learned trim here rather than mid-balance: EEPROM writes block for milliseconds.
-  if (wasArmed && millis() - armedAt > TRIM_SAVE_MS && fabs(cfg.trim - trimAtArm) > 0.05f) {
+  // Save here rather than mid-balance: EEPROM writes block for milliseconds.
+  bool learned = wasArmed && millis() - armedAt > TRIM_SAVE_MS && fabs(cfg.trim - trimAtArm) > 0.05f;
+  if (learned || savePending) {
     EEPROM.put(0, cfg);
-    Serial.print(F("# learned trim saved: "));
+    savePending = false;
+    Serial.print(F("# settings saved, trim "));
     Serial.println(cfg.trim);
   }
 }
@@ -344,9 +350,12 @@ void control() {
   speedCmd = constrain(speedCmd + accel * DT, -MAX_SPEED, MAX_SPEED);
   setSpeed(speedCmd);
 
-  // Push only as hard as needed: boost instantly with demand, ease back down slowly.
-  float demand = min(1.0f, fabs(accel) / POWER_FULL_ACCEL + fabs(speedCmd) / POWER_FULL_SPEED);
-  float want = cfg.minPower + (1 - cfg.minPower) * demand;
+  // Push only as hard as needed: the floor covers ordinary balancing, so boost only when the
+  // estimated need (with margin) exceeds it, or instantly to full when it's really falling.
+  // Ease back down slowly after a boost.
+  float demand = fabs(accel) / POWER_FULL_ACCEL + fabs(speedCmd) / POWER_FULL_SPEED;
+  float want = max(cfg.minPower, min(1.0f, POWER_MARGIN * demand));
+  if (fabs(tilt - target) > POWER_EMERGENCY_TILT) want = 1;
   power = max(want, power * POWER_DECAY);
   setPower(power);
 }
@@ -405,7 +414,15 @@ void handleCommand(char *cmd) {
     case 'f': cfg.flip = !cfg.flip; break;
     case 'k': disarm(F("command")); return;
     case 'm': telemetry = !telemetry; return;
-    case 'w': EEPROM.put(0, cfg); Serial.println(F("# saved")); return;
+    case 'w':
+      if (armed) {
+        savePending = true;
+        Serial.println(F("# will save when disarmed"));
+      } else {
+        EEPROM.put(0, cfg);
+        Serial.println(F("# saved"));
+      }
+      return;
     case 'r': loadDefaults(); break;
     case 'M': motorTest(); return;
     case 's': break;
