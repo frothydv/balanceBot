@@ -17,7 +17,7 @@ could never catch itself. A backup of that firmware is in [`backup/`](backup/).
 | MPU6050 (GY-521) | I2C at 0x68, mounted flat on the box floor |
 | 2 × bipolar steppers | 200 steps/rev, driven half-step (400/rev) |
 | 2 × L298N boards | One per motor, ENA/ENB jumpers fitted, 5V jumper fitted |
-| 12V supply | Unregulated wall adapter on the bench (reads ~16V unloaded) |
+| 12V supply | 12.8V 7Ah LiFePO4 battery (built-in BMS) strapped on top; earlier tuning used an unregulated wall adapter (~16V unloaded) |
 
 ### Wiring
 
@@ -136,15 +136,19 @@ rate, target angle, wheel speed (full steps/s), armed, trim, coil drive %.
 
 ## Tuned settings
 
-These are the firmware defaults, found by testing on the floor:
+These are the firmware defaults, found by testing on the floor with the battery strapped on
+top:
 
 | Setting | Value | Notes |
 |---|---|---|
-| kp / kd | 250 / 22 | kd sized for the ~17 cm effective pendulum length measured from a free fall |
+| kp / kd | 250 / 30 | Bare, kd 22 suited the ~17 cm effective pendulum length measured from a free fall. With the battery, 22 let a 1.5 Hz wobble grow, 30 holds it steady, and 38 grew into a runaway. |
 | kv / kx | 0.01 / 0.01 | At kv 0.004 it reached the speed cap and ran away |
 | ktrim | 0.002 | 0.003 swayed about ±1 rev around home; 0.002 settles, but takes ~20 s to fully adapt to a new load |
-| trim | 2.4° | Balance point of the bare bot |
+| trim | 6.4° | Balance point with the battery. The bare bot balanced at 2.4°. |
 | Idle power | 40% | Held in every run, loaded and bare, at about a quarter of full-power coil heat. 30% lost sync. |
+
+With the battery the bot still rocks gently at about 1.5 Hz. More torque (a higher idle
+power) may damp it, but the L298N boards overheated at 60% in a closed box.
 
 ## Tuning tips
 
@@ -161,8 +165,11 @@ These are the firmware defaults, found by testing on the floor:
 ## Limitations and next steps
 
 - **L298N drivers waste power and run hot.** They have no current control and drop 2–3V.
-  TMC2209 or A4988 drivers would give real current limiting and microstepping, and the
-  TMC2209 can detect stalls.
+  They got hot enough to smell at 60% idle power with runaways, inside the closed box. A fan
+  across the heatsinks helps; TMC2209 or A4988 drivers would fix it, with real current
+  limiting and microstepping, and the TMC2209 can detect stalls.
+- **Mount the IMU rigidly.** A loose IMU board made the balance angle creep and fed the
+  wobble.
 - **Heavier loads need more torque,** but the power boost only looks at acceleration and
   speed. Raise the idle power if you carry weight regularly.
 - **Planned:** drive and turn commands, then remote control through an ESP32 bridge (phone

@@ -98,9 +98,11 @@ void loadDefaults() {
   // kv/kx from the first run: 0.004 let it reach the speed cap and run away.
   // kv, kx and ktrim form a PID on wheel position: a CG shift first pushes the bot off
   // its spot, then trim keeps moving until it is back home on the true balance point.
-  // Trim 2.4 is what the bare bot learned. ktrim 0.003 swayed around home; 0.002 settles.
+  // Tuned with the 12.8V 7Ah LiFePO4 battery strapped on top: balance point 6.4 deg (the
+  // bare bot was 2.4), and kd 30 holds the heavier body's 1.5 Hz wobble steady (22 let it
+  // grow, 38 grew into a runaway). ktrim 0.003 swayed around home; 0.002 settles.
   // Idle drive 40% balanced fine (peak boost ~67%) at about a quarter of full-power heat.
-  cfg = {SETTINGS_MAGIC, 250, 22, 0.01, 0.01, 2.4, 0.995, true, false, 0.002, 0.4};
+  cfg = {SETTINGS_MAGIC, 250, 30, 0.01, 0.01, 6.4, 0.995, true, false, 0.002, 0.4};
 }
 
 // ---------- Stepper driver ----------
