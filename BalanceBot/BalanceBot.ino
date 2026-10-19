@@ -326,6 +326,9 @@ void control() {
   if (fabs(speedCmd) >= MAX_SPEED) {
     if (!pinnedSince) pinnedSince = millis() | 1;
     else if (millis() - pinnedSince > RUNAWAY_MS) {
+      // A runaway means it wasn't balancing, so whatever trim it learned is junk (a saved
+      // bad trim once made it fall on every arm). Discard it before disarm can save it.
+      cfg.trim = trimAtArm;
       disarm(F("runaway at max speed"));
       return;
     }
@@ -500,7 +503,10 @@ void loop() {
   int16_t ax, ay, az, gy;
   if (!readImu(ax, ay, az, gy)) {
     if (++imuFailures >= 3) {
-      if (armed) disarm(F("IMU read failed"));
+      if (armed) {
+        cfg.trim = trimAtArm;  // readings were failing, so don't trust what it learned
+        disarm(F("IMU read failed"));
+      }
       initImu();
       imuFailures = 0;
     }
